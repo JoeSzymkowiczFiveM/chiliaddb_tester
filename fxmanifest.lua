@@ -5,7 +5,6 @@ game         'gta5'
 
 name 'chiliaddb_tester'
 author 'JoeSzymkowiczFivem'
-version '0.0.1'
 license 'CC0 1.0 Universal (CC0 1.0)'
 description 'Unit testing resource for ChiliadDB'
 
