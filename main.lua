@@ -6,25 +6,15 @@ local function getTotalRecordsCount(data)
         size = size + 1
     end
     return size
-end
-
-local function getXRecordFromResponse(table, x)
-    local count = 1
-    for k, v in pairs(table) do
-        if v ~= nil then
-            if count == x then
-                return v
-            end
-            count = count + 1
-        end
-    end
-end
+end                                              
 
 ChiliadDB.ready(function()
     ChiliadDB.dropCollection('chiliad_tester')
     ChiliadDB.dropCollection('sdfgsdfgsdf')
     ChiliadDB.dropCollection('table_tester')
     ChiliadDB.dropCollection('test44')
+    ChiliadDB.dropCollection('multi_tester')
+    ChiliadDB.dropCollection('multi_tester_renamed')
     print("ChiliadDB Tester - ^2STARTING^7")
 
     print("Test 1 : insert - ^3RUNNING^7")
@@ -160,30 +150,26 @@ ChiliadDB.ready(function()
     assert(results21.currentIndex == 4)
     print("Test 21 : getCollectionProperties for valid collection - ^2PASSED^7")
     
-    print("Test 22 : create more holes and check order - ^3RUNNING^7")
-    ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
-    ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
-    ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
-    ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
-    local id8 = ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
-    local id9 = ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
-    local id10 = ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
-    ChiliadDB.delete({collection = 'chiliad_tester', query = {id = id8}})
-    ChiliadDB.delete({collection = 'chiliad_tester', query = {id = id9}})
-    ChiliadDB.delete({collection = 'chiliad_tester', query = {id = id10}})
+    print("Test 22 : test insertMany and check output - ^3RUNNING^7")
+    local insertManyIds = ChiliadDB.insertMany({collection = 'chiliad_tester', documents = {
+        {name = "test70", age = 10},
+        {name = "test70", age = 10},
+        {name = "test70", age = 11},
+        {name = "test70", age = 10},
+        {name = "test70", age = 10},
+        {name = "test70", age = 10},
+        {name = "test70", age = 10},
+    }, options = {selfInsertId = 'testId'}})
+    ChiliadDB.delete({collection = 'chiliad_tester', query = {id = insertManyIds[5]}})
+    ChiliadDB.delete({collection = 'chiliad_tester', query = {id = insertManyIds[6]}})
+    ChiliadDB.delete({collection = 'chiliad_tester', query = {id = insertManyIds[7]}})
     ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
     ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "test70", age = 10}, options = {selfInsertId = 'testId'}})
 
     local results22 = ChiliadDB.find({collection = 'chiliad_tester', query = {name = "test70"}})
-    local info = getXRecordFromResponse(results22, 2)
-    local info2 = getXRecordFromResponse(results22, 5)
-    local info3 = getXRecordFromResponse(results22, 6)
     local total = getTotalRecordsCount(results22)
-    assert(info.testId == 3)
-    assert(info2.testId == 7)
-    assert(info3.testId == 8)
     assert(total == 8)
-    print("Test 22 : create more holes and check order - ^2PASSED^7")
+    print("Test 22 : test insertMany and check output - ^2PASSED^7")
 
     print("Test 23 : skipIfExists insert - ^3RUNNING^7")
     ChiliadDB.insert({collection = 'chiliad_tester', document = {name = "testexists"}, options = {skipIfExists = {name = true}}})
@@ -195,26 +181,26 @@ ChiliadDB.ready(function()
 
     print("Test 24 : includeFields find - ^3RUNNING^7")
     local results24 = ChiliadDB.find({collection = 'chiliad_tester', options = {includeFields = {name = true, age = true}}})
-    local info24 = getXRecordFromResponse(results24, 1)
-    assert(info24.name ~= nil)
-    assert(info24.age ~= nil)
-    assert(info24.testId == nil)
+    assert(results24[7].name ~= nil)
+    assert(results24[7].age ~= nil)
+    assert(results24[7].age == 11)
+    assert(results24[7].testId == nil)
     print("Test 24 : includeFields find - ^2PASSED^7")
 
     print("Test 25 : excludeFields find - ^3RUNNING^7")
     local results25 = ChiliadDB.find({collection = 'chiliad_tester', options = {excludeFields = {name = true, age = true}}})
-    local info25 = getXRecordFromResponse(results25, 1)
-    assert(info25.name == nil)
-    assert(info25.age == nil)
-    assert(info25.testId ~= nil)
+    assert(results25[12].name == nil)
+    assert(results25[12].age == nil)
+    assert(results25[12].testId ~= nil)
     print("Test 25 : excludeFields find - ^2PASSED^7")
 
     print("Test 26 : excludeFields find 2 - ^3RUNNING^7")
     local results26 = ChiliadDB.find({collection = 'chiliad_tester', options = {excludeFields = { age = true}, limit = 8}})
-    local info3 = getXRecordFromResponse(results26, 6)
-    assert(results26[1] == nil)
-    assert(info3.testId == 7)
-    assert(info3.age == nil)
+    local count = getTotalRecordsCount(results26)
+    assert(count == 8)
+    assert(results26[7].testId == 7)
+    assert(results26[7].age == nil)
+    assert(results26[13] == nil)
     print("Test 26 : excludeFields find 2 - ^2PASSED^7")
 
     print("Test 27 : delete many - ^3RUNNING^7")
@@ -275,10 +261,11 @@ ChiliadDB.ready(function()
     local results32 = ChiliadDB.findOne({collection = 'chiliad_tester', query = {testId = 15}})
     assert(results32.stuff == nil)
     ChiliadDB.update({collection = 'chiliad_tester', query = {testId = 15}, update = {stuff = {}}})
-    local results322 = ChiliadDB.findOne({collection = 'chiliad_tester', query = {testId = 15}})
+    local results322, results322Id = ChiliadDB.findOne({collection = 'chiliad_tester', query = {testId = 15}})
     assert(results322.stuff ~= nil)
     assert(type(results322.stuff) == 'table')
     assert(#results322.stuff == 0)
+    assert(results322Id == 15)
     print("Test 32 : set key to empty table test - ^2PASSED^7")
 
     print("Test 33 : find with exists query operator - ^3RUNNING^7")
@@ -344,4 +331,31 @@ ChiliadDB.ready(function()
     local result38count = getTotalRecordsCount(result38)
     assert(result38count == 2)
     print("Test 38 : lua string match - ^2PASSED^7")
+
+    print("Test 39 : insertMany - ^3RUNNING^7")
+    local ids = ChiliadDB.insertMany({collection = 'multi_tester', documents = {
+        {name = "test2", age = 10},
+        {name = "test3", age = 20}
+    }, options = {selfInsertId = 'testId'}})
+    assert(#ids == 2)
+    assert(ids[1] == 1)
+    assert(ids[2] == 2)
+    print("Test 39 : insertMany - ^2PASSED^7")
+
+    print("Test 40 : insertMany with skipIfExistsCheck - ^3RUNNING^7")
+    local skipIfExistsCheck = ChiliadDB.insertMany({collection = 'multi_tester', documents = {
+        {name = "test4", age = 20},
+        {name = "test4", age = 12}
+    }, options = {skipIfExists = {age = true}}})
+    assert(#skipIfExistsCheck == 2)
+    assert(skipIfExistsCheck[1] == false)
+    assert(skipIfExistsCheck[2] == 3)
+    print("Test 40 : insertMany with skipIfExistsCheck - ^2PASSED^7")
+
+    print("Test 41 : renameCollection - ^3RUNNING^7")
+    local renameResult = ChiliadDB.renameCollection({collection = 'multi_tester', newName = 'multi_tester_renamed'})
+    assert(renameResult == true)
+    local renameFinder = ChiliadDB.find({collection = 'multi_tester_renamed'})
+    assert(#renameFinder == 3)
+    print("Test 41 : renameCollection - ^2PASSED^7")
 end)
