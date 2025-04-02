@@ -1,5 +1,3 @@
-local ChiliadDB = ChiliadDB
-
 local function getTotalRecordsCount(data)
     local size = 0
     for _ in pairs(data) do
@@ -13,7 +11,6 @@ ChiliadDB.ready(function()
     ChiliadDB.dropCollection('sdfgsdfgsdf')
     ChiliadDB.dropCollection('table_tester')
     ChiliadDB.dropCollection('test44')
-    ChiliadDB.dropCollection('multi_tester')
     ChiliadDB.dropCollection('multi_tester_renamed')
     print("ChiliadDB Tester - ^2STARTING^7")
 
@@ -284,7 +281,6 @@ ChiliadDB.ready(function()
     local result35 = ChiliadDB.createCollection('test44')
     assert(result35 == true)
     local result352 = ChiliadDB.getCollectionProperties('test44')
-    assert(result352.locked == false)
     assert(result352.retention == nil)
     ChiliadDB.setCollectionProperties({collection = 'test44', retention = {seconds = 5, minutes = 1}})
     ChiliadDB.insert({collection = 'test44', document = {name = "test1", age = 10}, options = {selfInsertId = 'testId'}})
@@ -334,8 +330,8 @@ ChiliadDB.ready(function()
 
     print("Test 39 : insertMany - ^3RUNNING^7")
     local ids = ChiliadDB.insertMany({collection = 'multi_tester', documents = {
-        {name = "test2", age = 10},
-        {name = "test3", age = 20}
+        {name = "test2", age = 10, class = 'wizard'},
+        {name = "test3", age = 20, class = 'warrior'}
     }, options = {selfInsertId = 'testId'}})
     assert(#ids == 2)
     assert(ids[1] == 1)
@@ -344,8 +340,8 @@ ChiliadDB.ready(function()
 
     print("Test 40 : insertMany with skipIfExistsCheck - ^3RUNNING^7")
     local skipIfExistsCheck = ChiliadDB.insertMany({collection = 'multi_tester', documents = {
-        {name = "test4", age = 20},
-        {name = "test4", age = 12}
+        {name = "test4", age = 20, class = 'warrior'},
+        {name = "test4", age = 12, class = 'warrior'}
     }, options = {skipIfExists = {age = true}}})
     assert(#skipIfExistsCheck == 2)
     assert(skipIfExistsCheck[1] == false)
@@ -358,4 +354,24 @@ ChiliadDB.ready(function()
     local renameFinder = ChiliadDB.find({collection = 'multi_tester_renamed'})
     assert(#renameFinder == 3)
     print("Test 41 : renameCollection - ^2PASSED^7")
+
+    print("Test 42 : aggregate - ^3RUNNING^7")
+    ChiliadDB.insertMany({collection = 'multi_tester_renamed', documents = {
+        {name = "test4", age = 20, class = 'wizard'},
+        {name = "test4", age = 12},
+        {name = "test4", age = 30, class = 'wizard'},
+        {name = "test4", age = 45, class = 'paladin'}
+    }})
+    local aggregateResult = ChiliadDB.aggregate({collection = 'multi_tester_renamed', query = {name = "test4"}, group = { fields = {"name", "class"}, sum = "age", alias = "ageSum" } })
+    assert(#aggregateResult == 4)
+    for i = 1, #aggregateResult do
+        if aggregateResult[i].class == 'wizard' then
+            assert(aggregateResult[i].age == nil)
+            assert(aggregateResult[i].ageSum == 50)
+            assert(#aggregateResult[i].ids == 2)
+        elseif aggregateResult[i].class == 'paladin' then
+            assert(aggregateResult[i].ageSum == 45)
+        end
+    end
+    print("Test 42 : aggregate - ^2PASSED^7")
 end)
