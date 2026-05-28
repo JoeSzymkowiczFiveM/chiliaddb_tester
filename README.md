@@ -4,3 +4,4 @@ I use this to unit test ChiliadDB. I guess if others want to work on the resourc
 
 ## ✅ Dependencies
  - chiliaddb
+ - ox_lib
