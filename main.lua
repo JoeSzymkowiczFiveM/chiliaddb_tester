@@ -1,4 +1,4 @@
-if not lib.checkDependency('chiliaddb', '0.2.2', true) then return end
+if not lib.checkDependency('chiliaddb', '0.3.0', true) then return end
 local testCounter = 0
 
 local function getTotalRecordsCount(data)
@@ -61,7 +61,20 @@ local function runAssertTest(name, cb)
     error(err)
 end
 
+local function benchmarkFindOne(collection, query, iterations)
+    local startTime = os.nanotime()
+    local foundDocument, foundId
+
+    for _ = 1, iterations do
+        foundDocument, foundId = ChiliadDB.findOne({ collection = collection, query = query })
+    end
+
+    local durationMs = (os.nanotime() - startTime) / 1e6
+    return durationMs, foundDocument, foundId
+end
+
 ChiliadDB.ready(function()
+    local startTime = os.nanotime()
     ChiliadDB.dropCollection('chiliad_tester')
     ChiliadDB.dropCollection('sdfgsdfgsdf')
     ChiliadDB.dropCollection('table_tester')
@@ -70,6 +83,8 @@ ChiliadDB.ready(function()
     ChiliadDB.dropCollection('ops_testing')
     ChiliadDB.dropCollection('sort_tester')
     ChiliadDB.dropCollection('coverage_tester')
+    ChiliadDB.dropCollection('index_benchmark_no_index')
+    ChiliadDB.dropCollection('index_benchmark_indexed')
 
     local id1 = ChiliadDB.insertOne({ collection = 'chiliad_tester', document = { name = "test1", age = 10 }, options = { selfInsertId = 'testId' } })
     local id2 = ChiliadDB.insertOne({ collection = 'chiliad_tester', document = { name = "test2", age = 10 }, options = { selfInsertId = 'testId' } })
@@ -549,4 +564,281 @@ ChiliadDB.ready(function()
         assert(ChiliadDB.collectionExists('does_not_exist') == false)
         assert(ChiliadDB.createCollection('sort_tester') == false)
     end)
+
+    runAssertTest('two simultaneous threads insert into same collection', function()
+        local collection = 'concurrency_insert_tester'
+        ChiliadDB.dropCollection(collection)
+
+        local thread1Done, thread2Done = false, false
+        local startWrites = false
+        local perThread = 100
+
+        CreateThread(function()
+            while not startWrites do Wait(0) end
+            for i = 1, perThread do
+                local id = ChiliadDB.insertOne({
+                    collection = collection,
+                    document = {
+                        writer = 'thread1',
+                        seq = i
+                    }
+                })
+                assert(id ~= false)
+            end
+            thread1Done = true
+        end)
+
+        CreateThread(function()
+            while not startWrites do Wait(0) end
+            for i = 1, perThread do
+                local id = ChiliadDB.insertOne({
+                    collection = collection,
+                    document = {
+                        writer = 'thread2',
+                        seq = i
+                    }
+                })
+                assert(id ~= false)
+            end
+            thread2Done = true
+        end)
+
+        startWrites = true
+
+        while not thread1Done or not thread2Done do
+            Wait(0)
+        end
+
+        local allDocs = ChiliadDB.find({ collection = collection, options = { excludeIndexes = true } })
+        assert(#allDocs == perThread * 2)
+
+        local thread1Count = 0
+        local thread2Count = 0
+        local seenPairs = {}
+
+        for i = 1, #allDocs do
+            local doc = allDocs[i]
+            if doc.writer == 'thread1' then thread1Count = thread1Count + 1 end
+            if doc.writer == 'thread2' then thread2Count = thread2Count + 1 end
+
+            local key = string.format('%s:%s', doc.writer, doc.seq)
+            assert(seenPairs[key] == nil)
+            seenPairs[key] = true
+        end
+
+        assert(thread1Count == perThread)
+        assert(thread2Count == perThread)
+
+        local props = ChiliadDB.getCollectionProperties(collection)
+        assert(props.currentIndex == perThread * 2)
+        assert(#props.ids == perThread * 2)
+    end)
+
+    runAssertTest('two simultaneous threads update same collection', function()
+        local collection = 'concurrency_update_tester'
+        ChiliadDB.dropCollection(collection)
+
+        local ids = {}
+        for i = 1, 100 do
+            ids[i] = ChiliadDB.insertOne({
+                collection = collection,
+                document = {
+                    value = 0,
+                    testId = i
+                }
+            })
+        end
+
+        local thread1Done, thread2Done = false, false
+        local startWrites = false
+
+        CreateThread(function()
+            while not startWrites do Wait(0) end
+            for i = 1, 100 do
+                local ok = ChiliadDB.updateOne({
+                    collection = collection,
+                    query = { id = ids[i] },
+                    update = { value = 1, updatedBy = 'thread1' }
+                })
+                assert(ok ~= false)
+            end
+            thread1Done = true
+        end)
+
+        CreateThread(function()
+            while not startWrites do Wait(0) end
+            for i = 1, 100 do
+                local ok = ChiliadDB.updateOne({
+                    collection = collection,
+                    query = { id = ids[i] },
+                    update = { touched = true, updatedBy2 = 'thread2' }
+                })
+                assert(ok ~= false)
+            end
+            thread2Done = true
+        end)
+
+        startWrites = true
+
+        while not thread1Done or not thread2Done do
+            Wait(0)
+        end
+
+        local docs = ChiliadDB.find({ collection = collection })
+        assert(getTotalRecordsCount(docs) == 100)
+        for _, doc in pairs(docs) do
+            assert(doc.value == 1)
+            assert(doc.touched == true)
+            assert(doc.updatedBy == 'thread1')
+            assert(doc.updatedBy2 == 'thread2')
+        end
+    end)
+
+    runAssertTest('mixed simultaneous writes on same collection', function()
+        local collection = 'concurrency_mixed_tester'
+        ChiliadDB.dropCollection(collection)
+
+        local baseIds = {}
+        for i = 1, 50 do
+            baseIds[i] = ChiliadDB.insertOne({
+                collection = collection,
+                document = {
+                    kind = 'base',
+                    seq = i,
+                    updated = false
+                }
+            })
+        end
+
+        local insertDone, updateDone, deleteDone = false, false, false
+        local startWrites = false
+
+        CreateThread(function()
+            while not startWrites do Wait(0) end
+            for i = 1, 50 do
+                local id = ChiliadDB.insertOne({
+                    collection = collection,
+                    document = {
+                        kind = 'inserted',
+                        seq = i
+                    }
+                })
+                assert(id ~= false)
+            end
+            insertDone = true
+        end)
+
+        CreateThread(function()
+            while not startWrites do Wait(0) end
+            for i = 1, 50 do
+                local ok = ChiliadDB.updateOne({
+                    collection = collection,
+                    query = { id = baseIds[i] },
+                    update = { updated = true, updateSeq = i }
+                })
+                assert(ok ~= false)
+            end
+            updateDone = true
+        end)
+
+        CreateThread(function()
+            while not startWrites do Wait(0) end
+            for i = 1, 25 do
+                local deletedId = ChiliadDB.deleteOne({
+                    collection = collection,
+                    query = { id = baseIds[i] }
+                })
+                assert(deletedId == baseIds[i])
+            end
+            deleteDone = true
+        end)
+
+        startWrites = true
+
+        while not insertDone or not updateDone or not deleteDone do
+            Wait(0)
+        end
+
+        local docs = ChiliadDB.find({ collection = collection })
+        assert(getTotalRecordsCount(docs) == 75)
+
+        local insertedCount = 0
+        local survivingBaseCount = 0
+        for _, doc in pairs(docs) do
+            if doc.kind == 'inserted' then
+                insertedCount = insertedCount + 1
+            elseif doc.kind == 'base' then
+                survivingBaseCount = survivingBaseCount + 1
+                assert(doc.updated == true)
+                assert(doc.updateSeq ~= nil)
+            end
+        end
+
+        assert(insertedCount == 50)
+        assert(survivingBaseCount == 25)
+    end)
+
+    runAssertTest('index benchmark findOne equality lookup', function()
+        local noIndexCollection = 'index_benchmark_no_index'
+        local indexedCollection = 'index_benchmark_indexed'
+        local documentCount = math.max(GetConvarInt('chiliaddb_tester:indexBenchmarkSize', 10000), 1)
+        local iterations = math.max(GetConvarInt('chiliaddb_tester:indexBenchmarkIterations', 100), 1)
+        local targetLookup = string.format('lookup_%d', documentCount)
+        local query = { lookupKey = targetLookup }
+
+        ChiliadDB.dropCollection(noIndexCollection)
+        ChiliadDB.dropCollection(indexedCollection)
+
+        local noIndexDocuments = {}
+        local indexedDocuments = {}
+        for i = 1, documentCount do
+            local document = {
+                lookupKey = string.format('lookup_%d', i),
+                payload = string.format('payload_%d', i),
+                group = i % 25
+            }
+            noIndexDocuments[i] = document
+            indexedDocuments[i] = {
+                lookupKey = document.lookupKey,
+                payload = document.payload,
+                group = document.group
+            }
+        end
+
+        local noIndexIds = ChiliadDB.insert({ collection = noIndexCollection, documents = noIndexDocuments })
+        assert(#noIndexIds == documentCount)
+
+        assert(ChiliadDB.ensureIndex({
+            collection = indexedCollection,
+            fields = { 'lookupKey' },
+            unique = true
+        }) == true)
+        local indexedIds = ChiliadDB.insert({ collection = indexedCollection, documents = indexedDocuments })
+        assert(#indexedIds == documentCount)
+
+        local noIndexDuration, noIndexDoc, noIndexId = benchmarkFindOne(noIndexCollection, query, iterations)
+        local indexedDuration, indexedDoc, indexedId = benchmarkFindOne(indexedCollection, query, iterations)
+
+        assert(noIndexDoc ~= nil)
+        assert(indexedDoc ~= nil)
+        assert(noIndexDoc.lookupKey == targetLookup)
+        assert(indexedDoc.lookupKey == targetLookup)
+        assert(noIndexId == documentCount)
+        assert(indexedId == documentCount)
+
+        print(string.format('^5Index benchmark collection size:^7 %d documents', documentCount))
+        print(string.format('^5Index benchmark iterations:^7 %d findOne lookups for %s', iterations, targetLookup))
+        print(string.format('^5No index duration:^7 %.4f ms total, %.4f ms avg', noIndexDuration,
+            noIndexDuration / iterations))
+        print(string.format('^5Indexed duration:^7 %.4f ms total, %.4f ms avg', indexedDuration,
+            indexedDuration / iterations))
+        if indexedDuration > 0 then
+            print(string.format('^5Index speedup:^7 %.2fx', noIndexDuration / indexedDuration))
+        end
+    end)
+
+    local endTime = os.nanotime()
+    local duration = endTime - startTime
+    -- convert to milliseconds
+    print(string.format("Test duration: %.2f ms", duration / 1e6))
 end)
