@@ -1,6 +1,28 @@
 if not lib.checkDependency('chiliaddb', '0.3.0', true) then return end
 local testCounter = 0
 
+local testCollections = {
+    'chiliad_tester',
+    'sdfgsdfgsdf',
+    'table_tester',
+    'test44',
+    'multi_tester_renamed',
+    'ops_testing',
+    'sort_tester',
+    'coverage_tester',
+    'concurrency_insert_tester',
+    'concurrency_update_tester',
+    'concurrency_mixed_tester',
+    'index_benchmark_no_index',
+    'index_benchmark_indexed',
+}
+
+local function dropTestCollections()
+    for _, collection in ipairs(testCollections) do
+        ChiliadDB.dropCollection(collection)
+    end
+end
+
 local function getTotalRecordsCount(data)
     local size = 0
     for _ in pairs(data) do
@@ -38,11 +60,13 @@ local function test(actual, expected, name, op)
             print(string.format(
                 "^7Assertion ^1FAILED^7 in test '%s'. Actual: %s, Expected to contain: %s, Operation: %s", name,
                 tostring(actual), tostring(expected), tostring(op)))
+            dropTestCollections()
             assert(false)
         end
     else
         print(string.format("^7Assertion ^1FAILED^7 in test '%s'. Actual: %s, Expected: %s, Operation: %s", name,
             tostring(actual), tostring(expected), tostring(op)))
+        dropTestCollections()
         assert(false)
     end
 end
@@ -58,6 +82,7 @@ local function runAssertTest(name, cb)
     end
 
     print(string.format("^7Assertion ^1FAILED^7 in test '%s'. %s", name, tostring(err)))
+    dropTestCollections()
     error(err)
 end
 
@@ -75,16 +100,7 @@ end
 
 ChiliadDB.ready(function()
     local startTime = os.nanotime()
-    ChiliadDB.dropCollection('chiliad_tester')
-    ChiliadDB.dropCollection('sdfgsdfgsdf')
-    ChiliadDB.dropCollection('table_tester')
-    ChiliadDB.dropCollection('test44')
-    ChiliadDB.dropCollection('multi_tester_renamed')
-    ChiliadDB.dropCollection('ops_testing')
-    ChiliadDB.dropCollection('sort_tester')
-    ChiliadDB.dropCollection('coverage_tester')
-    ChiliadDB.dropCollection('index_benchmark_no_index')
-    ChiliadDB.dropCollection('index_benchmark_indexed')
+    dropTestCollections()
 
     local id1 = ChiliadDB.insertOne({ collection = 'chiliad_tester', document = { name = "test1", age = 10 }, options = { selfInsertId = 'testId' } })
     local id2 = ChiliadDB.insertOne({ collection = 'chiliad_tester', document = { name = "test2", age = 10 }, options = { selfInsertId = 'testId' } })
@@ -567,7 +583,6 @@ ChiliadDB.ready(function()
 
     runAssertTest('two simultaneous threads insert into same collection', function()
         local collection = 'concurrency_insert_tester'
-        ChiliadDB.dropCollection(collection)
 
         local thread1Done, thread2Done = false, false
         local startWrites = false
@@ -636,7 +651,6 @@ ChiliadDB.ready(function()
 
     runAssertTest('two simultaneous threads update same collection', function()
         local collection = 'concurrency_update_tester'
-        ChiliadDB.dropCollection(collection)
 
         local ids = {}
         for i = 1, 100 do
@@ -696,7 +710,6 @@ ChiliadDB.ready(function()
 
     runAssertTest('mixed simultaneous writes on same collection', function()
         local collection = 'concurrency_mixed_tester'
-        ChiliadDB.dropCollection(collection)
 
         local baseIds = {}
         for i = 1, 50 do
@@ -786,9 +799,6 @@ ChiliadDB.ready(function()
         local targetLookup = string.format('lookup_%d', documentCount)
         local query = { lookupKey = targetLookup }
 
-        ChiliadDB.dropCollection(noIndexCollection)
-        ChiliadDB.dropCollection(indexedCollection)
-
         local noIndexDocuments = {}
         local indexedDocuments = {}
         for i = 1, documentCount do
@@ -841,4 +851,6 @@ ChiliadDB.ready(function()
     local duration = endTime - startTime
     -- convert to milliseconds
     print(string.format("Test duration: %.2f ms", duration / 1e6))
+
+    dropTestCollections()
 end)
